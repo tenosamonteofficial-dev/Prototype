@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockPulse — Bar & Kitchen Inventory + Thermal Print</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & JetBrains Mono (for thermal receipt) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Scrollbar for smooth UI */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(156, 163, 175, 0.4);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(156, 163, 175, 0.7);
+        }
+
+        /* Thermal Receipt Preview Styling */
+        .thermal-paper {
+            font-family: 'JetBrains Mono', monospace;
+            background: #ffffff;
+            color: #000000;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            transition: width 0.25s ease;
+        }
+        .thermal-58mm {
+            width: 240px; /* Approx 58mm printable width at 96dpi */
+            font-size: 11px;
+            line-height: 1.35;
+        }
+        .thermal-80mm {
+            width: 320px; /* Approx 80mm printable width at 96dpi */
+            font-size: 12.5px;
+            line-height: 1.4;
+        }
+        .receipt-divider {
+            border-top: 1px dashed #000000;
+            margin: 6px 0;
+        }
+        .receipt-double-divider {
+            border-top: 2px solid #000000;
+            border-bottom: 1px solid #000000;
+            height: 3px;
+            margin: 6px 0;
+        }
+
+        /* Dedicated Thermal Printer Media Queries */
+        @media print {
+            @page {
+                margin: 0;
+                size: auto;
+            }
+            body {
+                background: #ffffff !important;
+                color: #000000 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            /* Hide everything except the print container */
+            body > *:not(#print-mount) {
+                display: none !important;
+            }
+            #print-mount {
+                display: block !important;
+                position: static !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 2mm 3mm !important;
+                background: #ffffff !important;
+                color: #000000 !important;
+            }
+            #print-mount .thermal-paper {
+                box-shadow: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            #print-mount .thermal-58mm {
+                width: 54mm !important;
+                font-size: 9pt !important;
+            }
+            #print-mount .thermal-80mm {
+                width: 74mm !important;
+                font-size: 10pt !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200 selection:bg-indigo-500 selection:text-white">
+
+    <!-- Dedicated Print Mount (Hidden on Screen, Visible on Print) -->
+    <div id="print-mount" class="hidden"></div>
+
+    <!-- Top Navigation Bar -->
+    <header class="sticky top-0 z-30 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16 gap-3">
+                <!-- Brand & Editable Store Name -->
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
+                        <i class="fa-solid fa-boxes-stacked text-lg"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                            <h1 id="store-title-display" onclick="editStoreTitle()" title="Click to edit business/branch name" class="font-bold text-base sm:text-lg tracking-tight truncate cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition">
+                                Main Bar & Kitchen
+                            </h1>
+                            <button onclick="editStoreTitle()" class="text-slate-400 hover:text-indigo-600 text-xs p-1" aria-label="Edit store name">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                        </div>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">Daily Stock & Restock Manager</p>
+                    </div>
+                </div>
+
+                <!-- Primary Action Buttons -->
+                <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+                    <!-- Print Needed Stocks CTA -->
+                    <button onclick="openPrintModal()" class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold text-xs sm:text-sm px-3.5 sm:px-4 py-2.5 rounded-xl shadow-sm transition cursor-pointer">
+                        <i class="fa-solid fa-receipt"></i>
+                        <span>Print Needed</span>
+                        <span id="header-needed-badge" class="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full">0</span>
+                    </button>
+
+                    <!-- Add New Item CTA -->
+                    <button onclick="openItemModal()" class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-semibold text-xs sm:text-sm px-3.5 sm:px-4 py-2.5 rounded-xl shadow-sm transition cursor-pointer">
+                        <i class="fa-solid fa-plus"></i>
+                        <span class="hidden sm:inline">Add Item</span>
+                        <span class="sm:hidden">Item</span>
+                    </button>
+
+                    <!-- Settings / Backup Menu Button -->
+                    <div class="relative">
+                        <button id="data-menu-btn" onclick="toggleDataMenu()" class="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer" title="Settings & Data">
+                            <i class="fa-solid fa-sliders"></i>
+                        </button>
+                        <!-- Dropdown Menu -->
+                        <div id="data-dropdown" class="hidden absolute right-0 mt-2 w-56 rounded-2xl bg-white dark:bg-slate-800 shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-50 text-sm">
+                            <button onclick="toggleDarkMode(); toggleDataMenu();" class="w-full px-4 py-2.5 text-left flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700/70 transition">
+                                <i id="theme-icon" class="fa-solid fa-moon w-4 text-indigo-500"></i>
+                                <span id="theme-label">Dark Mode</span>
+                            </button>
+                            <button onclick="openCategoryModal(); toggleDataMenu();" class="w-full px-4 py-2.5 text-left flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700/70 transition">
+                                <i class="fa-solid fa-folder-plus w-4 text-amber-500"></i>
+                                <span>Manage Categories</span>
+                            </button>
+                            <div class="my-1 border-t border-slate-100 dark:border-slate-700"></div>
+                            <button onclick="exportDataJSON(); toggleDataMenu();" class="w-full px-4 py-2.5 text-left flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700/70 transition">
+                                <i class="fa-solid fa-download w-4 text-emerald-500"></i>
+                                <span>Export JSON Backup</span>
+                            </button>
+                            <label class="w-full px-4 py-2.5 text-left flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700/70 transition cursor-pointer">
+                                <i class="fa-solid fa-upload w-4 text-sky-500"></i>
+                                <span>Import JSON Backup</span>
+                                <input type="file" accept=".json" onchange="importDataJSON(event)" class="hidden">
+                            </label>
+                            <div class="my-1 border-t border-slate-100 dark:border-slate-700"></div>
+                            <button onclick="promptResetDemo(); toggleDataMenu();" class="w-full px-4 py-2.5 text-left flex items-center gap-3 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition">
+                                <i class="fa-solid fa-rotate-left w-4"></i>
+                                <span>Reset Sample Data</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Dashboard Content -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- Summary KPI Cards -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div class="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Items</p>
+                    <p id="stat-total" class="text-2xl font-extrabold mt-1">0</p>
+                </div>
+                <div class="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                    <i class="fa-solid fa-layer-group"></i>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">In Stock OK</p>
+                    <p id="stat-ok" class="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">0</p>
+                </div>
+                <div class="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <i class="fa-solid fa-circle-check"></i>
+                </div>
+            </div>
+
+            <div onclick="setFilterNeededOnly(true)" class="cursor-pointer bg-white dark:bg-slate-900 p-4 rounded-2xl border border-amber-200 dark:border-amber-900/60 hover:border-amber-400 transition shadow-xs flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-amber-700 dark:text-amber-400 uppercase tracking-wider">Stocks Needed</p>
+                    <p id="stat-needed" class="text-2xl font-extrabold text-amber-600 dark:text-amber-400 mt-1">0</p>
+                </div>
+                <div class="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                    <i class="fa-solid fa-cart-shopping"></i>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Categories</p>
+                    <p id="stat-categories" class="text-2xl font-extrabold mt-1">3</p>
+                </div>
+                <button onclick="openCategoryModal()" class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 hover:text-indigo-600 flex items-center justify-center transition" title="Add or delete categories">
+                    <i class="fa-solid fa-folder-plus"></i>
+                </button>
+            </div>
+        </section>
+
+        <!-- Category Tabs + Category Management Bar -->
+        <section class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div id="category-tabs" class="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <!-- Dynamically injected category pills -->
+            </div>
+
+            <button onclick="openCategoryModal()" class="self-start sm:self-auto inline-flex items-center gap-2 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 px-3.5 py-2 rounded-xl transition shrink-0 cursor-pointer">
+                <i class="fa-solid fa-tags"></i>
+                <span>+ / - Categories</span>
+            </button>
+        </section>
+
+        <!-- Search & Filter Controls -->
+        <section class="bg-white dark:bg-slate-900 p-3.5 sm:p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <!-- Search Box -->
+            <div class="relative flex-1">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                <input id="search-input" type="text" oninput="renderInventory()" placeholder="Search item name, unit, or notes..." class="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                <button id="clear-search-btn" onclick="clearSearch()" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Status Filter Toggle -->
+            <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start md:self-auto">
+                <button id="filter-all-btn" onclick="setFilterNeededOnly(false)" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs">
+                    All Items
+                </button>
+                <button id="filter-needed-btn" onclick="setFilterNeededOnly(true)" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer text-slate-600 dark:text-slate-300 hover:text-slate-900">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1"></i>
+                    Needed Only
+                </button>
+            </div>
+        </section>
+
+        <!-- Inventory List Container -->
+        <section id="inventory-container" class="space-y-6">
+            <!-- Dynamically populated inventory cards/tables grouped or filtered -->
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-200 dark:border-slate-800 py-5 mt-12 text-center text-xs text-slate-500 dark:text-slate-400">
+        <p>This System is developed by Teno Samonte &bull; Any claims or form of infringement will not be tolerated.</p>
+    </footer>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 1: ADD / EDIT INVENTORY ITEM                                    -->
+    <!-- ===================================================================== -->
+    <div id="item-modal" class="hidden fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 id="item-modal-title" class="text-lg font-bold">Add Inventory Item</h2>
+                <button onclick="closeItemModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form id="item-form" onsubmit="saveItemForm(event)" class="space-y-3.5">
+                <input type="hidden" id="item-id">
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Item Name *</label>
+                    <input id="item-name" type="text" required placeholder="e.g., Fresh Limes, Vodka, Paper Towels" class="w-full px-3.5 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Category *</label>
+                        <select id="item-category" required class="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Unit *</label>
+                        <input id="item-unit" type="text" required placeholder="bottles, kg, packs" value="pcs" class="w-full px-3.5 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Current Stock</label>
+                        <input id="item-current" type="number" step="any" min="0" required value="0" class="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Min / Par Level</label>
+                        <input id="item-min" type="number" step="any" min="0" required value="5" class="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1" title="Leave blank to auto-calculate (Min - Current)">Order Qty</label>
+                        <input id="item-custom-order" type="number" step="any" min="0" placeholder="Auto" class="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+
+                <label class="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
+                    <input id="item-force-need" type="checkbox" class="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500">
+                    <span class="text-xs font-medium text-slate-600 dark:text-slate-300">Always flag as "Needed" on print list</span>
+                </label>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <button type="button" onclick="closeItemModal()" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer">Cancel</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition cursor-pointer">Save Item</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 2: MANAGE CATEGORIES (ADD / DELETE)                             -->
+    <!-- ===================================================================== -->
+    <div id="category-modal" class="hidden fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-lg font-bold">Manage Categories</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Add or remove inventory sections</p>
+                </div>
+                <button onclick="closeCategoryModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Add New Category Form -->
+            <form onsubmit="addNewCategory(event)" class="flex items-center gap-2">
+                <input id="new-category-name" type="text" required placeholder="New category (e.g., Coffee Bar)" class="flex-1 px-3.5 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <select id="new-category-icon" class="px-2.5 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none">
+                    <option value="fa-box-open">Box</option>
+                    <option value="fa-martini-glass-citrus">Bar</option>
+                    <option value="fa-utensils">Kitchen</option>
+                    <option value="fa-mug-hot">Coffee</option>
+                    <option value="fa-snowflake">Freezer</option>
+                    <option value="fa-broom">Cleaning</option>
+                </select>
+                <button type="submit" class="px-3.5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition cursor-pointer">Add</button>
+            </form>
+
+            <!-- Existing Categories List -->
+            <div id="category-manage-list" class="max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl">
+                <!-- Populated dynamically -->
+            </div>
+
+            <div class="flex justify-end pt-2">
+                <button onclick="closeCategoryModal()" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 3: THERMAL RECEIPT PREVIEW & LOYVERSE-STYLE ESC/POS PRINT       -->
+    <!-- ===================================================================== -->
+    <div id="print-modal" class="hidden fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-4xl w-full max-h-[94vh] flex flex-col shadow-2xl overflow-hidden">
+            <!-- Modal Header -->
+            <div class="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                        <i class="fa-solid fa-print"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-base sm:text-lg font-bold">Thermal Receipt & Direct ESC/POS Print</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Loyverse-style raw byte output (58mm / 80mm)</p>
+                    </div>
+                </div>
+                <button onclick="closePrintModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg cursor-pointer">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Controls Bar -->
+            <div class="px-5 py-2.5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <!-- Paper Width Selector -->
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-semibold text-slate-500 dark:text-slate-400">Roll Width:</span>
+                    <div class="inline-flex rounded-xl bg-white dark:bg-slate-900 p-1 border border-slate-200 dark:border-slate-700">
+                        <button id="paper-58-btn" onclick="setPaperWidth('58mm')" class="px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer">58mm (32 col)</button>
+                        <button id="paper-80-btn" onclick="setPaperWidth('80mm')" class="px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-indigo-600 text-white">80mm (48 col)</button>
+                    </div>
+                </div>
+
+                <!-- Category Scope Filter for Receipt -->
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-semibold text-slate-500 dark:text-slate-400">Print Scope:</span>
+                    <select id="print-category-scope" onchange="renderThermalReceipt()" class="text-xs font-semibold px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:outline-none">
+                        <option value="ALL">All Needed Stocks</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Split Body: Receipt Preview (Left) + Direct Printer Controls (Right) -->
+            <div class="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12">
+                <!-- Receipt Scrollable Preview Stage -->
+                <div class="lg:col-span-6 p-5 bg-slate-200/70 dark:bg-slate-950 flex justify-center items-start overflow-y-auto border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800">
+                    <div id="receipt-preview-wrapper" class="thermal-paper thermal-80mm p-4 rounded-xs">
+                        <!-- Thermal receipt HTML generated here -->
+                    </div>
+                </div>
+
+                <!-- Direct ESC/POS Printer Actions Panel -->
+                <div class="lg:col-span-6 p-5 space-y-4 bg-white dark:bg-slate-900 overflow-y-auto">
+                    <div>
+                        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">1. Direct Hardware ESC/POS Print</h3>
+                        
+                        <!-- Option A: Android Bluetooth via RawBT -->
+                        <div class="p-3.5 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-2.5">
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                                        <i class="fa-brands fa-bluetooth-b"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="text-sm font-bold">RawBT Direct Print (Android)</h4>
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400">One-tap ESC/POS print to paired Bluetooth POS printers</p>
+                                    </div>
+                                </div>
+                                <button onclick="toggleRawBtHelp()" class="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 underline shrink-0 cursor-pointer">Setup Guide</button>
+                            </div>
+
+                            <!-- Collapsible RawBT Setup Tip -->
+                            <div id="rawbt-help-box" class="hidden text-[11px] bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60 text-slate-600 dark:text-slate-300 space-y-1">
+                                <p class="font-bold text-emerald-700 dark:text-emerald-400">How to enable driverless Bluetooth printing:</p>
+                                <ol class="list-decimal list-inside space-y-0.5">
+                                    <li>Pair your thermal printer in Android <strong>Settings &rarr; Bluetooth</strong> (PIN: <code>0000</code> or <code>1234</code>).</li>
+                                    <li>Install <strong>RawBT Print Service</strong> from Google Play &amp; select your paired printer inside RawBT.</li>
+                                    <li>Tap the green button below—it sends raw ESC/POS bytes straight to your printer like Loyverse!</li>
+                                </ol>
+                            </div>
+
+                            <button onclick="printViaRawBT()" class="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-2 transition cursor-pointer">
+                                <i class="fa-solid fa-bolt"></i>
+                                <span>Print via RawBT (Bluetooth ESC/POS)</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Option B: USB Direct Print (Web Serial API) -->
+                    <div class="p-3.5 rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2.5">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                                    <i class="fa-brands fa-usb"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-bold">USB Thermal Printer (Web Serial)</h4>
+                                    <p class="text-[11px] text-slate-500 dark:text-slate-400">Direct ESC/POS bytes for Chrome on PC / Chromebook</p>
+                                </div>
+                            </div>
+                            <span id="usb-serial-badge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300">Not Connected</span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <select id="usb-baud-rate" class="text-xs font-semibold px-2.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:outline-none" title="Printer Baud Rate">
+                                <option value="9600" selected>9600 baud (Standard)</option>
+                                <option value="115200">115200 baud (High Speed)</option>
+                                <option value="38400">38400 baud</option>
+                                <option value="19200">19200 baud</option>
+                            </select>
+                            <button onclick="printViaWebSerial()" class="flex-1 py-2 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition cursor-pointer">
+                                <i class="fa-solid fa-plug"></i>
+                                <span id="usb-print-btn-label">Connect &amp; Print USB</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Option C: Standard OS Print & Plain Text Share -->
+                    <div class="space-y-2 pt-1">
+                        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">2. Standard Print &amp; Messaging</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button onclick="executeThermalPrint()" class="py-2.5 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-semibold text-xs flex items-center justify-center gap-2 transition cursor-pointer">
+                                <i class="fa-solid fa-print"></i>
+                                <span>System Print Dialog</span>
+                            </button>
+                            <button onclick="copyReceiptText()" class="py-2.5 px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold text-xs flex items-center justify-center gap-2 transition cursor-pointer">
+                                <i class="fa-regular fa-copy"></i>
+                                <span>Copy Plain Text</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/90 text-xs text-slate-500 dark:text-slate-400">
+                <span id="escpos-byte-info">ESC/POS Ready &bull; 48 chars/line</span>
+                <button onclick="closePrintModal()" class="px-4 py-1.5 rounded-xl font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition cursor-pointer">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 4: CUSTOM DIALOG / CONFIRMATION / INPUT MODAL (NO alert())      -->
+    <!-- ===================================================================== -->
+    <div id="custom-dialog-modal" class="hidden fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+            <h3 id="dialog-title" class="text-base font-bold">Confirm Action</h3>
+            <p id="dialog-message" class="text-sm text-slate-600 dark:text-slate-300"></p>
+            <input id="dialog-input" type="text" class="hidden w-full px-3.5 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <div class="flex justify-end gap-2 pt-2">
+                <button id="dialog-cancel-btn" onclick="closeCustomDialog()" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">Cancel</button>
+                <button id="dialog-confirm-btn" class="px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Banner -->
+    <div id="toast-banner" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+        <div class="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 text-sm font-medium">
+            <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400 dark:text-emerald-600"></i>
+            <span id="toast-text">Saved!</span>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- APPLICATION LOGIC (JAVASCRIPT)                                        -->
+    <!-- ===================================================================== -->
+    <script>
+        // Storage Key
+        const STORAGE_KEY = 'stockpulse_inventory_v1';
+
+        // Default Starter Data
+        const DEFAULT_DATA = {
+            storeTitle: 'Main Bar & Kitchen',
+            paperWidth: '80mm',
+            darkMode: false,
+            categories: [
+                { id: 'cat-bar', name: 'Bar Needs', icon: 'fa-martini-glass-citrus' },
+                { id: 'cat-kitchen', name: 'Kitchen Needs', icon: 'fa-utensils' },
+                { id: 'cat-other', name: 'Other Needs', icon: 'fa-box-open' }
+            ],
+            items: [
+                // Bar Needs
+                { id: 'itm-1', name: 'House Vodka (750ml)', categoryId: 'cat-bar', unit: 'bottles', current: 2, min: 6, customOrder: null, forceNeed: false },
+                { id: 'itm-2', name: 'London Dry Gin', categoryId: 'cat-bar', unit: 'bottles', current: 5, min: 4, customOrder: null, forceNeed: false },
+                { id: 'itm-3', name: 'Fresh Limes', categoryId: 'cat-bar', unit: 'kg', current: 1, min: 4, customOrder: null, forceNeed: false },
+                { id: 'itm-4', name: 'Tonic Water Cans', categoryId: 'cat-bar', unit: 'packs', current: 2, min: 5, customOrder: null, forceNeed: false },
+                { id: 'itm-5', name: 'Cocktail Napkins', categoryId: 'cat-bar', unit: 'packs', current: 8, min: 5, customOrder: null, forceNeed: false },
+                // Kitchen Needs
+                { id: 'itm-6', name: 'Vegetable Cooking Oil', categoryId: 'cat-kitchen', unit: 'liters', current: 4, min: 15, customOrder: null, forceNeed: false },
+                { id: 'itm-7', name: 'All-Purpose Flour', categoryId: 'cat-kitchen', unit: 'kg', current: 12, min: 10, customOrder: null, forceNeed: false },
+                { id: 'itm-8', name: 'Unsalted Butter', categoryId: 'cat-kitchen', unit: 'blocks', current: 3, min: 8, customOrder: null, forceNeed: false },
+                { id: 'itm-9', name: 'Fresh Garlic', categoryId: 'cat-kitchen', unit: 'kg', current: 1.5, min: 3, customOrder: null, forceNeed: false },
+                // Other Needs
+                { id: 'itm-10', name: 'Thermal Receipt Rolls (80mm)', categoryId: 'cat-other', unit: 'rolls', current: 2, min: 10, customOrder: null, forceNeed: false },
+                { id: 'itm-11', name: 'Heavy Duty Trash Bags', categoryId: 'cat-other', unit: 'boxes', current: 1, min: 3, customOrder: null, forceNeed: false },
+                { id: 'itm-12', name: 'Dishwashing Liquid', categoryId: 'cat-other', unit: 'gallons', current: 4, min: 2, customOrder: null, forceNeed: false }
+            ]
+        };
+
+        // App State
+        let state = {
+            storeTitle: DEFAULT_DATA.storeTitle,
+            paperWidth: '80mm',
+            darkMode: false,
+            categories: [],
+            items: [],
+            activeCategory: 'ALL',
+            neededOnly: false
+        };
+
+        // Initialize App on Load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadState();
+            applyTheme();
+            renderAll();
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('data-dropdown');
+            const btn = document.getElementById('data-menu-btn');
+            if (dropdown && !dropdown.classList.contains('hidden') && !dropdown.contains(e.target) && !btn.contains(e.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // ---------------------------------------------------------------------
+        // LOCAL STORAGE PERSISTENCE & CORE HELPERS
+        // ---------------------------------------------------------------------
+        function loadState() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    state.storeTitle = parsed.storeTitle || DEFAULT_DATA.storeTitle;
+                    state.paperWidth = parsed.paperWidth || '80mm';
+                    state.darkMode = Boolean(parsed.darkMode);
+                    state.categories = Array.isArray(parsed.categories) && parsed.categories.length > 0
+                        ? parsed.categories
+                        : JSON.parse(JSON.stringify(DEFAULT_DATA.categories));
+                    state.items = Array.isArray(parsed.items)
+                        ? parsed.items
+                        : JSON.parse(JSON.stringify(DEFAULT_DATA.items));
+                } else {
+                    state.categories = JSON.parse(JSON.stringify(DEFAULT_DATA.categories));
+                    state.items = JSON.parse(JSON.stringify(DEFAULT_DATA.items));
+                    saveState();
+                }
+            } catch (e) {
+                console.error('Failed to load saved inventory:', e);
+                state.categories = JSON.parse(JSON.stringify(DEFAULT_DATA.categories));
+                state.items = JSON.parse(JSON.stringify(DEFAULT_DATA.items));
+            }
+        }
+
+        function saveState() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    storeTitle: state.storeTitle,
+                    paperWidth: state.paperWidth,
+                    darkMode: state.darkMode,
+                    categories: state.categories,
+                    items: state.items
+                }));
+            } catch (e) {
+                console.error('Failed to save inventory:', e);
+            }
+        }
+
+        function escapeHTML(str) {
+            return String(str || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function isItemNeeded(item) {
+            return Boolean(item.forceNeed) || Number(item.current) < Number(item.min);
+        }
+
+        function getNeededQuantity(item) {
+            if (item.customOrder !== null && item.customOrder !== undefined && item.customOrder !== '' && Number(item.customOrder) > 0) {
+                return Number(item.customOrder);
+            }
+            const deficit = Number(item.min) - Number(item.current);
+            return deficit > 0 ? Number(deficit.toFixed(2)) : 1;
+        }
+
+        // ---------------------------------------------------------------------
+        // RENDERING: DASHBOARD, KPI STATS, TABS & INVENTORY ITEMS
+        // ---------------------------------------------------------------------
+        function renderAll() {
+            document.getElementById('store-title-display').textContent = state.storeTitle;
+            renderStats();
+            renderCategoryTabs();
+            renderInventory();
+        }
+
+        function renderStats() {
+            const total = state.items.length;
+            const needed = state.items.filter(isItemNeeded).length;
+            const ok = total - needed;
+
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-ok').textContent = ok;
+            document.getElementById('stat-needed').textContent = needed;
+            document.getElementById('stat-categories').textContent = state.categories.length;
+            document.getElementById('header-needed-badge').textContent = needed;
+        }
+
+        function renderCategoryTabs() {
+            const container = document.getElementById('category-tabs');
+            const allCount = state.items.length;
+
+            let html = `
+                <button onclick="selectCategory('ALL')" class="px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 ${
+                    state.activeCategory === 'ALL'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-indigo-300'
+                }">
+                    <span>All Needs</span>
+                    <span class="px-1.5 py-0.5 rounded-full text-[10px] ${state.activeCategory === 'ALL' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800'}">${allCount}</span>
+                </button>
+            `;
+
+            state.categories.forEach(cat => {
+                const count = state.items.filter(i => i.categoryId === cat.id).length;
+                const active = state.activeCategory === cat.id;
+                html += `
+                    <button onclick="selectCategory('${cat.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 ${
+                        active
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-indigo-300'
+                    }">
+                        <i class="fa-solid ${escapeHTML(cat.icon || 'fa-box-open')}"></i>
+                        <span>${escapeHTML(cat.name)}</span>
+                        <span class="px-1.5 py-0.5 rounded-full text-[10px] ${active ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800'}">${count}</span>
+                    </button>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function selectCategory(catId) {
+            state.activeCategory = catId;
+            renderCategoryTabs();
+            renderInventory();
+        }
+
+        function setFilterNeededOnly(neededOnly) {
+            state.neededOnly = neededOnly;
+            const allBtn = document.getElementById('filter-all-btn');
+            const needBtn = document.getElementById('filter-needed-btn');
+
+            if (neededOnly) {
+                needBtn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-xs';
+                allBtn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer text-slate-600 dark:text-slate-300 hover:text-slate-900';
+            } else {
+                allBtn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs';
+                needBtn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer text-slate-600 dark:text-slate-300 hover:text-slate-900';
+            }
+            renderInventory();
+        }
+
+        function clearSearch() {
+            const input = document.getElementById('search-input');
+            input.value = '';
+            renderInventory();
+        }
+
+        function renderInventory() {
+            const container = document.getElementById('inventory-container');
+            const searchInput = document.getElementById('search-input');
+            const clearBtn = document.getElementById('clear-search-btn');
+            const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+            if (clearBtn) {
+                clearBtn.classList.toggle('hidden', query.length === 0);
+            }
+
+            const categoriesToRender = state.activeCategory === 'ALL'
+                ? state.categories
+                : state.categories.filter(c => c.id === state.activeCategory);
+
+            let html = '';
+            let totalVisibleItems = 0;
+
+            categoriesToRender.forEach(cat => {
+                let items = state.items.filter(i => i.categoryId === cat.id);
+
+                if (state.neededOnly) {
+                    items = items.filter(isItemNeeded);
+                }
+                if (query) {
+                    items = items.filter(i =>
+                        i.name.toLowerCase().includes(query) ||
+                        i.unit.toLowerCase().includes(query)
+                    );
+                }
+
+                if (items.length === 0 && (state.neededOnly || query || state.activeCategory === 'ALL')) {
+                    if (state.activeCategory !== 'ALL' || state.neededOnly || query) return;
+                }
+
+                totalVisibleItems += items.length;
+                const catNeededCount = items.filter(isItemNeeded).length;
+
+                html += `
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+                        <div class="px-4 sm:px-5 py-3.5 bg-slate-50/80 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-sm">
+                                    <i class="fa-solid ${escapeHTML(cat.icon || 'fa-box-open')}"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-bold text-sm sm:text-base">${escapeHTML(cat.name)}</h3>
+                                    <p class="text-[11px] text-slate-500 dark:text-slate-400">${items.length} item(s) &bull; ${catNeededCount} needed</p>
+                                </div>
+                            </div>
+                            <button onclick="openItemModal(null, '${cat.id}')" class="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 px-3 py-1.5 rounded-xl transition cursor-pointer">
+                                <i class="fa-solid fa-plus mr-1"></i>Add Here
+                            </button>
+                        </div>
+
+                        ${items.length === 0 ? `
+                            <div class="p-8 text-center text-sm text-slate-400">
+                                No items in this category yet. Click <strong>Add Here</strong> to add stocks.
+                            </div>
+                        ` : `
+                            <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                                ${items.map(item => {
+                                    const needed = isItemNeeded(item);
+                                    const orderQty = getNeededQuantity(item);
+                                    return `
+                                        <div class="p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${needed ? 'bg-amber-50/40 dark:bg-amber-950/10' : ''} hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="flex items-center gap-2 flex-wrap">
+                                                    <span class="font-semibold text-sm sm:text-base">${escapeHTML(item.name)}</span>
+                                                    ${needed ? `
+                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">
+                                                            <i class="fa-solid fa-cart-plus text-[10px]"></i> Need +${orderQty} ${escapeHTML(item.unit)}
+                                                        </span>
+                                                    ` : `
+                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-400">
+                                                            OK
+                                                        </span>
+                                                    `}
+                                                </div>
+                                                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                                    Min / Par: <strong>${item.min} ${escapeHTML(item.unit)}</strong>
+                                                    ${item.forceNeed ? ' &bull; <span class="text-amber-600 dark:text-amber-400 font-medium">Pinned to order list</span>' : ''}
+                                                </p>
+                                            </div>
+
+                                            <!-- Stock Stepper & Actions -->
+                                            <div class="flex items-center justify-between sm:justify-end gap-2 sm:gap-3">
+                                                <div class="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700">
+                                                    <button onclick="adjustStock('${item.id}', -1)" class="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center shadow-2xs transition cursor-pointer" aria-label="Decrease stock">
+                                                        <i class="fa-solid fa-minus text-xs"></i>
+                                                    </button>
+                                                    <input type="number" step="any" min="0" value="${item.current}" onchange="setStockDirect('${item.id}', this.value)" class="w-14 text-center font-bold text-sm bg-transparent focus:outline-none">
+                                                    <button onclick="adjustStock('${item.id}', 1)" class="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center shadow-2xs transition cursor-pointer" aria-label="Increase stock">
+                                                        <i class="fa-solid fa-plus text-xs"></i>
+                                                    </button>
+                                                </div>
+
+                                                <span class="text-xs font-medium text-slate-500 dark:text-slate-400 w-12 truncate hidden md:inline">${escapeHTML(item.unit)}</span>
+
+                                                <div class="flex items-center gap-1">
+                                                    <button onclick="toggleForceNeed('${item.id}')" title="${item.forceNeed ? 'Unpin from order list' : 'Flag as needed'}" class="p-2 rounded-xl transition cursor-pointer ${item.forceNeed ? 'text-amber-600 bg-amber-100 dark:bg-amber-950' : 'text-slate-400 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800'}">
+                                                        <i class="fa-solid fa-flag text-xs"></i>
+                                                    </button>
+                                                    <button onclick="openItemModal('${item.id}')" title="Edit item" class="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer">
+                                                        <i class="fa-solid fa-pen text-xs"></i>
+                                                    </button>
+                                                    <button onclick="deleteItem('${item.id}')" title="Delete item" class="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer">
+                                                        <i class="fa-solid fa-trash text-xs"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        `}
+                    </div>
+                `;
+            });
+
+            if (totalVisibleItems === 0 && (state.neededOnly || query)) {
+                html = `
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-10 text-center space-y-2">
+                        <div class="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto text-xl">
+                            <i class="fa-solid fa-check-double"></i>
+                        </div>
+                        <h3 class="font-bold text-base">Nothing matches your current filter</h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">All visible stocks are sufficient or no items match your search.</p>
+                        <button onclick="setFilterNeededOnly(false); clearSearch();" class="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition cursor-pointer">
+                            Show All Items
+                        </button>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        // ---------------------------------------------------------------------
+        // ITEM STOCK ADJUSTMENTS & CRUD
+        // ---------------------------------------------------------------------
+        function adjustStock(itemId, delta) {
+            const item = state.items.find(i => i.id === itemId);
+            if (!item) return;
+            const next = Math.max(0, Number((Number(item.current) + delta).toFixed(2)));
+            item.current = next;
+            saveState();
+            renderStats();
+            renderInventory();
+        }
+
+        function setStockDirect(itemId, rawVal) {
+            const item = state.items.find(i => i.id === itemId);
+            if (!item) return;
+            const parsed = parseFloat(rawVal);
+            item.current = isNaN(parsed) || parsed < 0 ? 0 : Number(parsed.toFixed(2));
+            saveState();
+            renderStats();
+            renderInventory();
+        }
+
+        function toggleForceNeed(itemId) {
+            const item = state.items.find(i => i.id === itemId);
+            if (!item) return;
+            item.forceNeed = !item.forceNeed;
+            saveState();
+            renderStats();
+            renderInventory();
+            showToast(item.forceNeed ? 'Flagged for restock' : 'Unflagged item');
+        }
+
+        function openItemModal(itemId = null, defaultCategoryId = null) {
+            const catSelect = document.getElementById('item-category');
+            catSelect.innerHTML = state.categories
+                .map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`)
+                .join('');
+
+            if (itemId) {
+                const item = state.items.find(i => i.id === itemId);
+                if (!item) return;
+                document.getElementById('item-modal-title').textContent = 'Edit Inventory Item';
+                document.getElementById('item-id').value = item.id;
+                document.getElementById('item-name').value = item.name;
+                catSelect.value = item.categoryId;
+                document.getElementById('item-unit').value = item.unit;
+                document.getElementById('item-current').value = item.current;
+                document.getElementById('item-min').value = item.min;
+                document.getElementById('item-custom-order').value = item.customOrder !== null && item.customOrder !== undefined ? item.customOrder : '';
+                document.getElementById('item-force-need').checked = Boolean(item.forceNeed);
+            } else {
+                document.getElementById('item-modal-title').textContent = 'Add Inventory Item';
+                document.getElementById('item-id').value = '';
+                document.getElementById('item-name').value = '';
+                catSelect.value = defaultCategoryId || (state.activeCategory !== 'ALL' ? state.activeCategory : (state.categories[0]?.id || ''));
+                document.getElementById('item-unit').value = 'pcs';
+                document.getElementById('item-current').value = 0;
+                document.getElementById('item-min').value = 5;
+                document.getElementById('item-custom-order').value = '';
+                document.getElementById('item-force-need').checked = false;
+            }
+
+            document.getElementById('item-modal').classList.remove('hidden');
+            setTimeout(() => document.getElementById('item-name').focus(), 50);
+        }
+
+        function closeItemModal() {
+            document.getElementById('item-modal').classList.add('hidden');
+        }
+
+        function saveItemForm(event) {
+            event.preventDefault();
+            const id = document.getElementById('item-id').value;
+            const name = document.getElementById('item-name').value.trim();
+            const categoryId = document.getElementById('item-category').value;
+            const unit = document.getElementById('item-unit').value.trim() || 'pcs';
+            const current = Math.max(0, parseFloat(document.getElementById('item-current').value) || 0);
+            const min = Math.max(0, parseFloat(document.getElementById('item-min').value) || 0);
+            const rawCustomOrder = document.getElementById('item-custom-order').value;
+            const customOrder = rawCustomOrder !== '' && parseFloat(rawCustomOrder) > 0 ? parseFloat(rawCustomOrder) : null;
+            const forceNeed = document.getElementById('item-force-need').checked;
+
+            if (!name) return;
+
+            if (id) {
+                const idx = state.items.findIndex(i => i.id === id);
+                if (idx !== -1) {
+                    state.items[idx] = { ...state.items[idx], name, categoryId, unit, current, min, customOrder, forceNeed };
+                    showToast('Item updated');
+                }
+            } else {
+                state.items.push({
+                    id: 'itm-' + Date.now(),
+                    name,
+                    categoryId,
+                    unit,
+                    current,
+                    min,
+                    customOrder,
+                    forceNeed
+                });
+                showToast('Item added');
+            }
+
+            saveState();
+            closeItemModal();
+            renderAll();
+        }
+
+        function deleteItem(itemId) {
+            const item = state.items.find(i => i.id === itemId);
+            if (!item) return;
+            openCustomDialog({
+                title: 'Delete Item?',
+                message: `Remove "${item.name}" from your inventory list?`,
+                confirmText: 'Delete',
+                danger: true,
+                onConfirm: () => {
+                    state.items = state.items.filter(i => i.id !== itemId);
+                    saveState();
+                    renderAll();
+                    showToast('Item deleted');
+                }
+            });
+        }
+
+        // ---------------------------------------------------------------------
+        // CATEGORY MANAGEMENT (ADD / DELETE)
+        // ---------------------------------------------------------------------
+        function openCategoryModal() {
+            renderCategoryManageList();
+            document.getElementById('category-modal').classList.remove('hidden');
+        }
+
+        function closeCategoryModal() {
+            document.getElementById('category-modal').classList.add('hidden');
+        }
+
+        function renderCategoryManageList() {
+            const list = document.getElementById('category-manage-list');
+            list.innerHTML = state.categories.map(cat => {
+                const count = state.items.filter(i => i.categoryId === cat.id).length;
+                return `
+                    <div class="px-3.5 py-2.5 flex items-center justify-between gap-2 bg-white dark:bg-slate-900">
+                        <div class="flex items-center gap-2.5">
+                            <i class="fa-solid ${escapeHTML(cat.icon || 'fa-box-open')} text-indigo-500 w-4 text-center"></i>
+                            <span class="text-sm font-semibold">${escapeHTML(cat.name)}</span>
+                            <span class="text-xs text-slate-400">(${count})</span>
+                        </div>
+                        <button onclick="deleteCategory('${cat.id}')" class="text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 px-2.5 py-1 rounded-lg transition cursor-pointer" title="Delete category">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function addNewCategory(event) {
+            event.preventDefault();
+            const nameInput = document.getElementById('new-category-name');
+            const iconSelect = document.getElementById('new-category-icon');
+            const name = nameInput.value.trim();
+            if (!name) return;
+
+            state.categories.push({
+                id: 'cat-' + Date.now(),
+                name,
+                icon: iconSelect.value || 'fa-box-open'
+            });
+
+            nameInput.value = '';
+            saveState();
+            renderCategoryManageList();
+            renderAll();
+            showToast(`Category "${name}" added`);
+        }
+
+        function deleteCategory(catId) {
+            if (state.categories.length <= 1) {
+                showToast('You must keep at least one category.', true);
+                return;
+            }
+            const cat = state.categories.find(c => c.id === catId);
+            if (!cat) return;
+            const itemCount = state.items.filter(i => i.categoryId === catId).length;
+
+            openCustomDialog({
+                title: `Delete "${cat.name}"?`,
+                message: itemCount > 0
+                    ? `This will also delete ${itemCount} item(s) inside "${cat.name}".`
+                    : `Remove empty category "${cat.name}"?`,
+                confirmText: 'Delete Category',
+                danger: true,
+                onConfirm: () => {
+                    state.categories = state.categories.filter(c => c.id !== catId);
+                    state.items = state.items.filter(i => i.categoryId !== catId);
+                    if (state.activeCategory === catId) {
+                        state.activeCategory = 'ALL';
+                    }
+                    saveState();
+                    renderCategoryManageList();
+                    renderAll();
+                    showToast('Category deleted');
+                }
+            });
+        }
+
+        // ---------------------------------------------------------------------
+        // THERMAL RECEIPT GENERATOR & LOYVERSE-STYLE ESC/POS ENGINE
+        // ---------------------------------------------------------------------
+        let activeSerialPort = null;
+
+        function openPrintModal() {
+            const scopeSelect = document.getElementById('print-category-scope');
+            scopeSelect.innerHTML = `<option value="ALL">All Needed Stocks</option>` +
+                state.categories.map(c => `<option value="${c.id}">${escapeHTML(c.name)} Only</option>`).join('');
+
+            if (state.activeCategory !== 'ALL') {
+                scopeSelect.value = state.activeCategory;
+            }
+
+            updateSerialStatusUI();
+            setPaperWidth(state.paperWidth || '80mm', false);
+            renderThermalReceipt();
+            document.getElementById('print-modal').classList.remove('hidden');
+        }
+
+        function closePrintModal() {
+            document.getElementById('print-modal').classList.add('hidden');
+        }
+
+        function toggleRawBtHelp() {
+            document.getElementById('rawbt-help-box').classList.toggle('hidden');
+        }
+
+        function setPaperWidth(width, shouldSave = true) {
+            state.paperWidth = width;
+            if (shouldSave) saveState();
+
+            const btn58 = document.getElementById('paper-58-btn');
+            const btn80 = document.getElementById('paper-80-btn');
+            const wrapper = document.getElementById('receipt-preview-wrapper');
+
+            if (width === '58mm') {
+                btn58.className = 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-indigo-600 text-white';
+                btn80.className = 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-slate-600 dark:text-slate-300';
+                wrapper.classList.remove('thermal-80mm');
+                wrapper.classList.add('thermal-58mm');
+            } else {
+                btn80.className = 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-indigo-600 text-white';
+                btn58.className = 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-slate-600 dark:text-slate-300';
+                wrapper.classList.remove('thermal-58mm');
+                wrapper.classList.add('thermal-80mm');
+            }
+            renderThermalReceipt();
+        }
+
+        function renderThermalReceipt() {
+            const scope = document.getElementById('print-category-scope').value;
+            const wrapper = document.getElementById('receipt-preview-wrapper');
+
+            const now = new Date();
+            const dateStr = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+            const timeStr = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
+            const categoriesToInclude = scope === 'ALL'
+                ? state.categories
+                : state.categories.filter(c => c.id === scope);
+
+            let totalItemsToBuy = 0;
+            let sectionsHTML = '';
+
+            categoriesToInclude.forEach(cat => {
+                const neededItems = state.items.filter(i => i.categoryId === cat.id && isItemNeeded(i));
+                if (neededItems.length === 0) return;
+
+                totalItemsToBuy += neededItems.length;
+
+                sectionsHTML += `
+                    <div style="margin-top: 8px;">
+                        <div style="font-weight: 700; text-transform: uppercase; background: #000; color: #fff; padding: 2px 4px;">
+                            ${escapeHTML(cat.name)} (${neededItems.length})
+                        </div>
+                        <div style="margin-top: 4px;">
+                            ${neededItems.map(item => {
+                                const orderQty = getNeededQuantity(item);
+                                return `
+                                    <div style="display: flex; justify-content: space-between; align-items: flex-start; padding: 3px 0; border-bottom: 1px dotted #999;">
+                                        <div style="padding-right: 6px; flex: 1;">
+                                            <span style="font-weight: 700;">[ ] ${escapeHTML(item.name)}</span>
+                                            <div style="font-size: 0.85em; color: #222;">
+                                                Have: ${item.current} / Min: ${item.min} ${escapeHTML(item.unit)}
+                                            </div>
+                                        </div>
+                                        <div style="font-weight: 700; white-space: nowrap; text-align: right;">
+                                            +${orderQty} ${escapeHTML(item.unit)}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+
+            if (totalItemsToBuy === 0) {
+                sectionsHTML = `
+                    <div style="text-align: center; padding: 18px 4px;">
+                        <div style="font-weight: 700;">*** ALL STOCKED ***</div>
+                        <div style="font-size: 0.9em; margin-top: 4px;">No items currently need restocking in this selection.</div>
+                    </div>
+                `;
+            }
+
+            wrapper.innerHTML = `
+                <div style="text-align: center;">
+                    <div style="font-weight: 700; font-size: 1.15em; text-transform: uppercase;">${escapeHTML(state.storeTitle)}</div>
+                    <div style="font-weight: 700; margin-top: 2px;">STOCK RESTOCK / ORDER SLIP</div>
+                    <div style="font-size: 0.85em; margin-top: 2px;">${dateStr} &bull; ${timeStr}</div>
+                </div>
+                <div class="receipt-double-divider"></div>
+                ${sectionsHTML}
+                <div class="receipt-divider" style="margin-top: 10px;"></div>
+                <div style="display: flex; justify-content: space-between; font-weight: 700;">
+                    <span>TOTAL LINES TO BUY:</span>
+                    <span>${totalItemsToBuy}</span>
+                </div>
+                <div class="receipt-divider"></div>
+                <div style="margin-top: 14px; font-size: 0.85em;">
+                    <div>Checked By: ___________________</div>
+                    <div style="margin-top: 10px;">Approved By: __________________</div>
+                </div>
+                <div style="text-align: center; font-size: 0.8em; margin-top: 14px;">
+                    --- END OF LIST ---
+                </div>
+            `;
+
+            // Update ESC/POS byte counter badge in modal footer
+            const bytes = buildEscPosBytes();
+            const cols = state.paperWidth === '58mm' ? 32 : 48;
+            const infoEl = document.getElementById('escpos-byte-info');
+            if (infoEl) {
+                infoEl.textContent = `ESC/POS Ready \u2022 ${cols} chars/line (${bytes.length} bytes)`;
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // RAW ESC/POS BYTE STREAM BUILDER (58mm = 32 cols, 80mm = 48 cols)
+        // ---------------------------------------------------------------------
+        function sanitizeAscii(str) {
+            return String(str || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^\x20-\x7E]/g, '?');
+        }
+
+        function formatTwoColumnLine(leftText, rightText, maxCols) {
+            const left = sanitizeAscii(leftText);
+            const right = sanitizeAscii(rightText);
+            if (left.length + right.length + 1 <= maxCols) {
+                const spaces = ' '.repeat(maxCols - left.length - right.length);
+                return left + spaces + right;
+            }
+            // Wrap long item name cleanly onto first line, right-align qty on second line
+            const wrappedLeft = left.slice(0, maxCols);
+            const padSecond = ' '.repeat(Math.max(0, maxCols - right.length));
+            return wrappedLeft + '\n' + padSecond + right;
+        }
+
+        function buildEscPosBytes() {
+            const maxCols = state.paperWidth === '58mm' ? 32 : 48;
+            const scope = document.getElementById('print-category-scope').value;
+            const encoder = new TextEncoder();
+            const chunks = [];
+
+            const pushCmd = (...bytes) => chunks.push(new Uint8Array(bytes));
+            const pushText = (txt) => chunks.push(encoder.encode(sanitizeAscii(txt) + '\n'));
+
+            // ESC/POS Hardware Commands
+            const ESC = 0x1B;
+            const GS = 0x1D;
+
+            // Initialize printer
+            pushCmd(ESC, 0x40);
+
+            // Header: Center, Bold, Double-Width & Double-Height for Store/Branch
+            pushCmd(ESC, 0x61, 0x01); // Center align
+            pushCmd(ESC, 0x45, 0x01); // Bold ON
+            pushCmd(GS, 0x21, 0x11);  // Double height + Double width
+            pushText(state.storeTitle.toUpperCase());
+
+            // Reset size, keep bold for subtitle
+            pushCmd(GS, 0x21, 0x00);
+            pushText('STOCK RESTOCK / ORDER SLIP');
+            pushCmd(ESC, 0x45, 0x00); // Bold OFF
+
+            const now = new Date();
+            const dateStr = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+            const timeStr = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+            pushText(`${dateStr}  ${timeStr}`);
+
+            // Switch to Left Align for body
+            pushCmd(ESC, 0x61, 0x00);
+            pushText('='.repeat(maxCols));
+
+            const categoriesToInclude = scope === 'ALL'
+                ? state.categories
+                : state.categories.filter(c => c.id === scope);
+
+            let totalItemsToBuy = 0;
+
+            categoriesToInclude.forEach(cat => {
+                const neededItems = state.items.filter(i => i.categoryId === cat.id && isItemNeeded(i));
+                if (neededItems.length === 0) return;
+
+                totalItemsToBuy += neededItems.length;
+
+                pushText('');
+                pushCmd(ESC, 0x45, 0x01); // Bold ON
+                pushText(`[ ${cat.name.toUpperCase()} (${neededItems.length}) ]`);
+                pushCmd(ESC, 0x45, 0x00); // Bold OFF
+                pushText('-'.repeat(maxCols));
+
+                neededItems.forEach(item => {
+                    const orderQty = getNeededQuantity(item);
+                    const leftCol = `[ ] ${item.name}`;
+                    const rightCol = `+${orderQty} ${item.unit}`;
+
+                    pushCmd(ESC, 0x45, 0x01); // Bold item line
+                    pushText(formatTwoColumnLine(leftCol, rightCol, maxCols));
+                    pushCmd(ESC, 0x45, 0x00);
+                    pushText(`    Have: ${item.current} / Min: ${item.min} ${item.unit}`);
+                });
+            });
+
+            if (totalItemsToBuy === 0) {
+                pushCmd(ESC, 0x61, 0x01);
+                pushText('');
+                pushCmd(ESC, 0x45, 0x01);
+                pushText('*** ALL STOCKED ***');
+                pushCmd(ESC, 0x45, 0x00);
+                pushText('No items need restocking.');
+                pushCmd(ESC, 0x61, 0x00);
+            }
+
+            pushText('');
+            pushText('='.repeat(maxCols));
+            pushCmd(ESC, 0x45, 0x01);
+            pushText(formatTwoColumnLine('TOTAL LINES TO BUY:', String(totalItemsToBuy), maxCols));
+            pushCmd(ESC, 0x45, 0x00);
+            pushText('-'.repeat(maxCols));
+            pushText('');
+            pushText('Checked By:  ____________________');
+            pushText('');
+            pushText('Approved By: ____________________');
+            pushText('');
+
+            pushCmd(ESC, 0x61, 0x01);
+            pushText('--- END OF RESTOCK SLIP ---');
+            pushCmd(ESC, 0x61, 0x00);
+
+            // Feed 4 lines and trigger full/partial paper cut
+            pushCmd(ESC, 0x64, 0x04);
+            pushCmd(GS, 0x56, 0x00);
+
+            // Merge all Uint8Array chunks into single byte array
+            const totalLength = chunks.reduce((sum, arr) => sum + arr.length, 0);
+            const result = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+                result.set(chunk, offset);
+                offset += chunk.length;
+            }
+            return result;
+        }
+
+        function uint8ArrayToBase64(bytes) {
+            let binary = '';
+            const len = bytes.byteLength;
+            for (let i = 0; i < len; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return btoa(binary);
+        }
+
+        // 1. Android Bluetooth via RawBT URL Scheme (Loyverse-like instant print)
+        function printViaRawBT() {
+            try {
+                const escPosBytes = buildEscPosBytes();
+                const base64Data = uint8ArrayToBase64(escPosBytes);
+                showToast('Sending ESC/POS receipt to RawBT...');
+                window.location.href = 'rawbt:base64,' + base64Data;
+            } catch (err) {
+                console.error('RawBT error:', err);
+                showToast('Could not launch RawBT intent', true);
+            }
+        }
+
+        // 2. USB Direct ESC/POS via Chrome Web Serial API
+        function updateSerialStatusUI() {
+            const badge = document.getElementById('usb-serial-badge');
+            const label = document.getElementById('usb-print-btn-label');
+            if (!badge || !label) return;
+
+            if (!('serial' in navigator)) {
+                badge.textContent = 'Not Supported in Browser';
+                badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-500';
+                return;
+            }
+
+            if (activeSerialPort && activeSerialPort.writable) {
+                badge.textContent = 'USB Ready';
+                badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300';
+                label.textContent = 'Print Now via USB';
+            } else {
+                badge.textContent = 'Disconnected';
+                badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300';
+                label.textContent = 'Connect & Print USB';
+            }
+        }
+
+        async function printViaWebSerial() {
+            if (!('serial' in navigator)) {
+                showToast('Web Serial is only supported in Chrome/Edge on Desktop or Chromebook.', true);
+                return;
+            }
+
+            try {
+                const baudRate = parseInt(document.getElementById('usb-baud-rate').value, 10) || 9600;
+
+                if (!activeSerialPort) {
+                    activeSerialPort = await navigator.serial.requestPort();
+                }
+
+                if (!activeSerialPort.writable) {
+                    await activeSerialPort.open({ baudRate });
+                }
+
+                updateSerialStatusUI();
+
+                const escPosBytes = buildEscPosBytes();
+                const writer = activeSerialPort.writable.getWriter();
+                await writer.write(escPosBytes);
+                writer.releaseLock();
+
+                showToast('Sent raw ESC/POS bytes to USB printer!');
+            } catch (err) {
+                console.error('Web Serial print error:', err);
+                activeSerialPort = null;
+                updateSerialStatusUI();
+                if (err.name !== 'NotFoundError') {
+                    showToast('USB Printer Error: ' + err.message, true);
+                }
+            }
+        }
+
+        // 3. Standard OS / Browser Print Dialog
+        function executeThermalPrint() {
+            const printMount = document.getElementById('print-mount');
+            const receiptContent = document.getElementById('receipt-preview-wrapper').outerHTML;
+            printMount.innerHTML = receiptContent;
+
+            // Trigger native browser print dialog (which prints #print-mount cleanly via @media print)
+            setTimeout(() => {
+                window.print();
+            }, 100);
+        }
+
+        function copyReceiptText() {
+            const scope = document.getElementById('print-category-scope').value;
+            const now = new Date();
+            let lines = [
+                `${state.storeTitle.toUpperCase()} - RESTOCK LIST`,
+                `Date: ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+                `--------------------------------`
+            ];
+
+            const categoriesToInclude = scope === 'ALL'
+                ? state.categories
+                : state.categories.filter(c => c.id === scope);
+
+            let count = 0;
+            categoriesToInclude.forEach(cat => {
+                const neededItems = state.items.filter(i => i.categoryId === cat.id && isItemNeeded(i));
+                if (neededItems.length === 0) return;
+                lines.push(`\n[ ${cat.name.toUpperCase()} ]`);
+                neededItems.forEach(item => {
+                    count++;
+                    lines.push(`[ ] ${item.name}: Need +${getNeededQuantity(item)} ${item.unit} (Have ${item.current}/${item.min})`);
+                });
+            });
+
+            if (count === 0) {
+                lines.push(`All items are sufficiently stocked!`);
+            } else {
+                lines.push(`\n--------------------------------`);
+                lines.push(`Total Items to Restock: ${count}`);
+            }
+
+            const textArea = document.createElement('textarea');
+            textArea.value = lines.join('\n');
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            showToast('Restock list copied to clipboard!');
+        }
+
+        // ---------------------------------------------------------------------
+        // SETTINGS, THEME, BACKUP & STORE NAME
+        // ---------------------------------------------------------------------
+        function toggleDataMenu() {
+            document.getElementById('data-dropdown').classList.toggle('hidden');
+        }
+
+        function toggleDarkMode() {
+            state.darkMode = !state.darkMode;
+            saveState();
+            applyTheme();
+        }
+
+        function applyTheme() {
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            const label = document.getElementById('theme-label');
+            if (state.darkMode) {
+                html.classList.add('dark');
+                if (icon) icon.className = 'fa-solid fa-sun w-4 text-amber-400';
+                if (label) label.textContent = 'Light Mode';
+            } else {
+                html.classList.remove('dark');
+                if (icon) icon.className = 'fa-solid fa-moon w-4 text-indigo-500';
+                if (label) label.textContent = 'Dark Mode';
+            }
+        }
+
+        function editStoreTitle() {
+            openCustomDialog({
+                title: 'Business / Branch Name',
+                message: 'This title appears at the top of your dashboard and thermal receipts.',
+                inputValue: state.storeTitle,
+                confirmText: 'Save Name',
+                onConfirm: (val) => {
+                    if (val && val.trim()) {
+                        state.storeTitle = val.trim();
+                        saveState();
+                        renderAll();
+                        showToast('Branch name updated');
+                    }
+                }
+            });
+        }
+
+        function exportDataJSON() {
+            const dataStr = JSON.stringify(state, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `inventory-backup-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Backup file downloaded');
+        }
+
+        function importDataJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (Array.isArray(imported.categories) && Array.isArray(imported.items)) {
+                        state.storeTitle = imported.storeTitle || state.storeTitle;
+                        state.categories = imported.categories;
+                        state.items = imported.items;
+                        state.activeCategory = 'ALL';
+                        saveState();
+                        renderAll();
+                        showToast('Inventory restored from backup!');
+                    } else {
+                        showToast('Invalid backup JSON format', true);
+                    }
+                } catch (err) {
+                    showToast('Could not read backup file', true);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        function promptResetDemo() {
+            openCustomDialog({
+                title: 'Reset to Sample Data?',
+                message: 'This will replace your current categories and items with the default Bar, Kitchen, and Other sample items.',
+                confirmText: 'Reset Data',
+                danger: true,
+                onConfirm: () => {
+                    state.storeTitle = DEFAULT_DATA.storeTitle;
+                    state.categories = JSON.parse(JSON.stringify(DEFAULT_DATA.categories));
+                    state.items = JSON.parse(JSON.stringify(DEFAULT_DATA.items));
+                    state.activeCategory = 'ALL';
+                    saveState();
+                    renderAll();
+                    showToast('Reset to sample inventory');
+                }
+            });
+        }
+
+        // ---------------------------------------------------------------------
+        // CUSTOM DIALOG & TOAST SYSTEM (NO NATIVE alert() / confirm())
+        // ---------------------------------------------------------------------
+        let dialogCallback = null;
+
+        function openCustomDialog({ title, message, inputValue = null, confirmText = 'Confirm', danger = false, onConfirm }) {
+            document.getElementById('dialog-title').textContent = title;
+            document.getElementById('dialog-message').textContent = message;
+
+            const inputEl = document.getElementById('dialog-input');
+            if (inputValue !== null) {
+                inputEl.value = inputValue;
+                inputEl.classList.remove('hidden');
+            } else {
+                inputEl.classList.add('hidden');
+            }
+
+            const confirmBtn = document.getElementById('dialog-confirm-btn');
+            confirmBtn.textContent = confirmText;
+            confirmBtn.className = danger
+                ? 'px-4 py-2 rounded-xl text-sm font-semibold bg-rose-600 hover:bg-rose-700 text-white transition cursor-pointer'
+                : 'px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition cursor-pointer';
+
+            dialogCallback = () => {
+                const val = inputValue !== null ? inputEl.value : true;
+                closeCustomDialog();
+                if (onConfirm) onConfirm(val);
+            };
+
+            confirmBtn.onclick = dialogCallback;
+            document.getElementById('custom-dialog-modal').classList.remove('hidden');
+            if (inputValue !== null) {
+                setTimeout(() => inputEl.focus(), 50);
+            }
+        }
+
+        function closeCustomDialog() {
+            document.getElementById('custom-dialog-modal').classList.add('hidden');
+            dialogCallback = null;
+        }
+
+        let toastTimer = null;
+        function showToast(msg, isError = false) {
+            const banner = document.getElementById('toast-banner');
+            const text = document.getElementById('toast-text');
+            const icon = document.getElementById('toast-icon');
+
+            text.textContent = msg;
+            icon.className = isError
+                ? 'fa-solid fa-circle-exclamation text-rose-400'
+                : 'fa-solid fa-circle-check text-emerald-400 dark:text-emerald-600';
+
+            banner.classList.remove('translate-y-20', 'opacity-0');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                banner.classList.add('translate-y-20', 'opacity-0');
+            }, 2600);
+        }
+    </script>
+</body>
+</html>
